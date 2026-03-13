@@ -15,7 +15,7 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - name: Grant gradlew execute permission
-        run: chmod +x gradlew || gradle wrapper --gradle-version 8.8
+        run: chmod +x gradlew || gradle wrapper --gradle-version 8.8 --distribution-type bin
       - name: Build
         run: ./gradlew build
       - name: Upload jar
