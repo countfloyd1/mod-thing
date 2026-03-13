@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "com.playerwatch.mixin.client",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ChatScreenMixin",
+    "GameRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "playerwatch",
+  "version": "${version}",
+  "name": "PlayerWatch",
+  "description": "See what other players are up to - typing, in a GUI, or idle!",
+  "authors": ["You"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/playerwatch/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.playerwatch.PlayerWatchMod"],
+    "client": ["com.playerwatch.client.PlayerWatchClient"]
+  },
+  "mixins": [
+    "playerwatch.mixins.json",
+    {
+      "config": "playerwatch.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1"
+  }
+}
