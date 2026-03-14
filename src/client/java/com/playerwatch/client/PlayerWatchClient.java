@@ -38,14 +38,15 @@ public class PlayerWatchClient implements ClientModInitializer {
             if (client.world == null || client.player == null) return;
             dotAnimTick++;
 
-            // Copy to avoid concurrent modification
             ArrayList<AbstractClientPlayerEntity> players = new ArrayList<>();
-client.world.getPlayers().forEach(p -> { if (p instanceof AbstractClientPlayerEntity ap) players.add(ap); });
+            client.world.getPlayers().forEach(p -> {
+                if (p instanceof AbstractClientPlayerEntity ap) players.add(ap);
+            });
 
             for (AbstractClientPlayerEntity player : players) {
                 if (player == client.player) continue;
                 UUID uuid = player.getUuid();
-                Vec3d currentPos = player.getPos();
+                Vec3d currentPos = new Vec3d(player.getX(), player.getY(), player.getZ());
                 Vec3d lastPos = lastPositions.get(uuid);
 
                 if (lastPos == null || !currentPos.equals(lastPos)) {
@@ -56,11 +57,8 @@ client.world.getPlayers().forEach(p -> { if (p instanceof AbstractClientPlayerEn
                 }
             }
 
-            // Clean up disconnected players
             Set<UUID> currentUuids = new HashSet<>();
-            for (AbstractClientPlayerEntity p : players) {
-                currentUuids.add(p.getUuid());
-            }
+            for (AbstractClientPlayerEntity p : players) currentUuids.add(p.getUuid());
             idleTicks.keySet().retainAll(currentUuids);
             lastPositions.keySet().retainAll(currentUuids);
         });
@@ -73,27 +71,31 @@ client.world.getPlayers().forEach(p -> { if (p instanceof AbstractClientPlayerEn
         if (client.world == null || client.player == null) return;
         if (client.options.hudHidden) return;
 
-        float tickDelta = tickCounter.getTickDelta(true);
+        float tickDelta = tickCounter.getLastFrameDuration();
         int screenW = client.getWindow().getScaledWidth();
         int screenH = client.getWindow().getScaledHeight();
 
-       ArrayList<AbstractClientPlayerEntity> renderPlayers = new ArrayList<>();
-client.world.getPlayers().forEach(p -> { if (p instanceof AbstractClientPlayerEntity ap) renderPlayers.add(ap); });
-for (AbstractClientPlayerEntity player : renderPlayers) {
+        ArrayList<AbstractClientPlayerEntity> renderPlayers = new ArrayList<>();
+        client.world.getPlayers().forEach(p -> {
+            if (p instanceof AbstractClientPlayerEntity ap) renderPlayers.add(ap);
+        });
+
+        for (AbstractClientPlayerEntity player : renderPlayers) {
             if (player == client.player) continue;
 
             String label = getLabel(player);
             if (label == null) continue;
             int color = getColor(player);
 
-            double px = MathHelper.lerp(tickDelta, player.prevX, player.getX());
-            double py = MathHelper.lerp(tickDelta, player.prevY, player.getY()) + player.getHeight() + 0.5;
-            double pz = MathHelper.lerp(tickDelta, player.prevZ, player.getZ());
+            double px = MathHelper.lerp(tickDelta, player.lastRenderX, player.getX());
+            double py = MathHelper.lerp(tickDelta, player.lastRenderY, player.getY()) + player.getHeight() + 0.5;
+            double pz = MathHelper.lerp(tickDelta, player.lastRenderZ, player.getZ());
 
-            Vec3d screenPos = projectToScreen(client, new Vec3d(px, py, pz), tickDelta, screenW, screenH);
+            Vec3d camPos = new Vec3d(client.player.getX(), client.player.getEyeY(), client.player.getZ());
+            Vec3d screenPos = projectToScreen(client, new Vec3d(px, py, pz), camPos, screenW, screenH);
             if (screenPos == null) continue;
 
-            double dist = client.player.getPos().distanceTo(new Vec3d(px, py, pz));
+            double dist = camPos.distanceTo(new Vec3d(px, py, pz));
             if (dist > 32) continue;
 
             float scale = (float) MathHelper.clamp(1.0 - (dist / 48.0), 0.4, 1.0);
@@ -101,19 +103,18 @@ for (AbstractClientPlayerEntity player : renderPlayers) {
             int sy = (int) screenPos.y;
             int textWidth = client.textRenderer.getWidth(label);
 
-            context.getMatrices().push();
-            context.getMatrices().translate(sx, sy, 0);
-            context.getMatrices().scale(scale, scale, 1.0f);
+            context.getMatrices().pushMatrix();
+            context.getMatrices().translate(sx, sy);
+            context.getMatrices().scale(scale, scale);
             context.fill(-textWidth / 2 - 2, -2, textWidth / 2 + 2, 10, 0x60000000);
             context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(label), 0, 0, color);
-            context.getMatrices().pop();
+            context.getMatrices().popMatrix();
         }
     }
 
     private static String getLabel(AbstractClientPlayerEntity player) {
         UUID uuid = player.getUuid();
         int idle = idleTicks.getOrDefault(uuid, 0);
-
         if (player.isSleeping()) return "😴 sleeping";
         if (player.getPose() == EntityPose.CROUCHING) return "🤫 sneaking";
         if (idle >= IDLE_THRESHOLD) {
@@ -132,17 +133,13 @@ for (AbstractClientPlayerEntity player : renderPlayers) {
         return 0xFFFFFF;
     }
 
-    private static Vec3d projectToScreen(MinecraftClient client, Vec3d worldPos, float tickDelta, int screenW, int screenH) {
-        double camX = MathHelper.lerp(tickDelta, client.player.prevX, client.player.getX());
-        double camY = MathHelper.lerp(tickDelta, client.player.prevY, client.player.getY()) + client.player.getEyeHeight(client.player.getPose());
-        double camZ = MathHelper.lerp(tickDelta, client.player.prevZ, client.player.getZ());
+    private static Vec3d projectToScreen(MinecraftClient client, Vec3d worldPos, Vec3d camPos, int screenW, int screenH) {
+        double dx = worldPos.x - camPos.x;
+        double dy = worldPos.y - camPos.y;
+        double dz = worldPos.z - camPos.z;
 
-        double dx = worldPos.x - camX;
-        double dy = worldPos.y - camY;
-        double dz = worldPos.z - camZ;
-
-        float yaw = (float) Math.toRadians(MathHelper.lerp(tickDelta, client.player.prevYaw, client.player.getYaw()));
-        float pitch = (float) Math.toRadians(MathHelper.lerp(tickDelta, client.player.prevPitch, client.player.getPitch()));
+        float yaw = (float) Math.toRadians(client.player.getYaw());
+        float pitch = (float) Math.toRadians(client.player.getPitch());
 
         double sinYaw = Math.sin(yaw);
         double cosYaw = Math.cos(yaw);
