@@ -39,7 +39,8 @@ public class PlayerWatchClient implements ClientModInitializer {
             dotAnimTick++;
 
             // Copy to avoid concurrent modification
-            ArrayList<AbstractClientPlayerEntity> players = new ArrayList<>(client.world.getPlayers());
+            ArrayList<AbstractClientPlayerEntity> players = new ArrayList<>();
+client.world.getPlayers().forEach(p -> { if (p instanceof AbstractClientPlayerEntity ap) players.add(ap); });
 
             for (AbstractClientPlayerEntity player : players) {
                 if (player == client.player) continue;
@@ -76,7 +77,9 @@ public class PlayerWatchClient implements ClientModInitializer {
         int screenW = client.getWindow().getScaledWidth();
         int screenH = client.getWindow().getScaledHeight();
 
-        for (AbstractClientPlayerEntity player : new ArrayList<>(client.world.getPlayers())) {
+       ArrayList<AbstractClientPlayerEntity> renderPlayers = new ArrayList<>();
+client.world.getPlayers().forEach(p -> { if (p instanceof AbstractClientPlayerEntity ap) renderPlayers.add(ap); });
+for (AbstractClientPlayerEntity player : renderPlayers) {
             if (player == client.player) continue;
 
             String label = getLabel(player);
