@@ -71,7 +71,7 @@ public class PlayerWatchClient implements ClientModInitializer {
         if (client.world == null || client.player == null) return;
         if (client.options.hudHidden) return;
 
-        float tickDelta = tickCounter.getDeltaTicks();
+        float tickDelta = 1.0f;
         int screenW = client.getWindow().getScaledWidth();
         int screenH = client.getWindow().getScaledHeight();
 
