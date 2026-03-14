@@ -16,8 +16,11 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -28,6 +31,43 @@ public class PlayerWatchClient implements ClientModInitializer {
     private static final Map<UUID, Integer> idleTicks = new HashMap<>();
     private static final int IDLE_THRESHOLD = 200;
     private static int dotAnimTick = 0;
+    private static Method getPlayersMethod = null;
+
+    @SuppressWarnings("unchecked")
+    private static List<AbstractClientPlayerEntity> getPlayers(MinecraftClient client) {
+        if (client.world == null) return new ArrayList<>();
+        // Try reflection to find the right method name
+        if (getPlayersMethod == null) {
+            for (Method m : client.world.getClass().getMethods()) {
+                try {
+                    if (m.getParameterCount() == 0) {
+                        Object result = m.invoke(client.world);
+                        if (result instanceof List<?> list && !list.isEmpty()
+                                && list.get(0) instanceof AbstractClientPlayerEntity) {
+                            getPlayersMethod = m;
+                            PlayerWatchMod.LOGGER.info("PlayerWatch: found players method: " + m.getName());
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+        if (getPlayersMethod != null) {
+            try {
+                return (List<AbstractClientPlayerEntity>) getPlayersMethod.invoke(client.world);
+            } catch (Exception e) {
+                getPlayersMethod = null;
+            }
+        }
+        // Fallback: scan all entities
+        List<AbstractClientPlayerEntity> result = new ArrayList<>();
+        try {
+            for (var entity : client.world.getEntities()) {
+                if (entity instanceof AbstractClientPlayerEntity p) result.add(p);
+            }
+        } catch (Exception ignored) {}
+        return result;
+    }
 
     @Override
     public void onInitializeClient() {
@@ -36,20 +76,20 @@ public class PlayerWatchClient implements ClientModInitializer {
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
             lastPositions.clear();
             idleTicks.clear();
+            getPlayersMethod = null;
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.world == null || client.player == null) return;
             dotAnimTick++;
 
-            ArrayList<AbstractClientPlayerEntity> players = new ArrayList<>(client.world.players);
+            List<AbstractClientPlayerEntity> players = getPlayers(client);
 
             for (AbstractClientPlayerEntity player : players) {
                 if (player == client.player) continue;
                 UUID uuid = player.getUuid();
                 Vec3d currentPos = new Vec3d(player.getX(), player.getY(), player.getZ());
                 Vec3d lastPos = lastPositions.get(uuid);
-
                 if (lastPos == null || !currentPos.equals(lastPos)) {
                     lastPositions.put(uuid, currentPos);
                     idleTicks.put(uuid, 0);
@@ -58,18 +98,10 @@ public class PlayerWatchClient implements ClientModInitializer {
                 }
             }
 
-            // Clean up disconnected players
-            players.stream().map(AbstractClientPlayerEntity::getUuid)
-                .collect(java.util.stream.Collectors.toSet())
-                .equals(idleTicks.keySet());
-            idleTicks.keySet().retainAll(
-                players.stream().map(AbstractClientPlayerEntity::getUuid)
-                    .collect(java.util.stream.Collectors.toSet())
-            );
-            lastPositions.keySet().retainAll(
-                players.stream().map(AbstractClientPlayerEntity::getUuid)
-                    .collect(java.util.stream.Collectors.toSet())
-            );
+            java.util.Set<UUID> uuids = new java.util.HashSet<>();
+            for (AbstractClientPlayerEntity p : players) uuids.add(p.getUuid());
+            idleTicks.keySet().retainAll(uuids);
+            lastPositions.keySet().retainAll(uuids);
         });
 
         HudRenderCallback.EVENT.register(PlayerWatchClient::renderLabels);
@@ -83,7 +115,7 @@ public class PlayerWatchClient implements ClientModInitializer {
         int screenW = client.getWindow().getScaledWidth();
         int screenH = client.getWindow().getScaledHeight();
 
-        for (AbstractClientPlayerEntity player : new ArrayList<>(client.world.players)) {
+        for (AbstractClientPlayerEntity player : getPlayers(client)) {
             if (player == client.player) continue;
 
             String label = getLabel(player);
