@@ -1,7 +1,6 @@
 package com.playerwatch.client;
 
 import com.playerwatch.PlayerWatchMod;
-import com.playerwatch.common.PlayerState;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -16,29 +15,33 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Environment(EnvType.CLIENT)
 public class PlayerWatchClient implements ClientModInitializer {
 
-    // Track last known positions for idle detection
     private static final Map<UUID, Vec3d> lastPositions = new HashMap<>();
     private static final Map<UUID, Integer> idleTicks = new HashMap<>();
-    private static final int IDLE_THRESHOLD = 200; // ~10 seconds
+    private static final int IDLE_THRESHOLD = 200;
     private static int dotAnimTick = 0;
 
     @Override
     public void onInitializeClient() {
         PlayerWatchMod.LOGGER.info("PlayerWatch (client-only mode) initializing...");
 
-        // Tick loop: update idle tracking for all visible players
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.world == null || client.player == null) return;
             dotAnimTick++;
 
-            for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
+            // Copy to avoid concurrent modification
+            ArrayList<AbstractClientPlayerEntity> players = new ArrayList<>(client.world.getPlayers());
+
+            for (AbstractClientPlayerEntity player : players) {
                 if (player == client.player) continue;
                 UUID uuid = player.getUuid();
                 Vec3d currentPos = player.getPos();
@@ -53,12 +56,12 @@ public class PlayerWatchClient implements ClientModInitializer {
             }
 
             // Clean up disconnected players
-            idleTicks.keySet().removeIf(uuid ->
-                client.world.getPlayers().stream().noneMatch(p -> p.getUuid().equals(uuid))
-            );
-            lastPositions.keySet().removeIf(uuid ->
-                client.world.getPlayers().stream().noneMatch(p -> p.getUuid().equals(uuid))
-            );
+            Set<UUID> currentUuids = new HashSet<>();
+            for (AbstractClientPlayerEntity p : players) {
+                currentUuids.add(p.getUuid());
+            }
+            idleTicks.keySet().retainAll(currentUuids);
+            lastPositions.keySet().retainAll(currentUuids);
         });
 
         HudRenderCallback.EVENT.register(PlayerWatchClient::renderLabels);
@@ -73,7 +76,7 @@ public class PlayerWatchClient implements ClientModInitializer {
         int screenW = client.getWindow().getScaledWidth();
         int screenH = client.getWindow().getScaledHeight();
 
-        for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
+        for (AbstractClientPlayerEntity player : new ArrayList<>(client.world.getPlayers())) {
             if (player == client.player) continue;
 
             String label = getLabel(player);
@@ -114,7 +117,7 @@ public class PlayerWatchClient implements ClientModInitializer {
             int dots = (dotAnimTick / 10 % 3) + 1;
             return "💤 afk" + ".".repeat(dots);
         }
-        return null; // normal, show nothing
+        return null;
     }
 
     private static int getColor(AbstractClientPlayerEntity player) {
