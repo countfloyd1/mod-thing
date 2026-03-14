@@ -117,7 +117,7 @@ public class PlayerWatchClient implements ClientModInitializer {
         int screenH = client.getWindow().getScaledHeight();
 
         Camera camera = client.gameRenderer.getCamera();
-        Vec3d camPos = camera.getPos();
+        Vec3d camPos = new Vec3d(camera.getX(), camera.getY(), camera.getZ());
 
         for (AbstractClientPlayerEntity player : getPlayers(client)) {
             if (player == client.player) continue;
