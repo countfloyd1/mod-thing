@@ -5,6 +5,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
@@ -17,9 +18,7 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 @Environment(EnvType.CLIENT)
@@ -34,17 +33,25 @@ public class PlayerWatchClient implements ClientModInitializer {
     public void onInitializeClient() {
         PlayerWatchMod.LOGGER.info("PlayerWatch (client-only mode) initializing...");
 
+        // Clear state on disconnect
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            lastPositions.clear();
+            idleTicks.clear();
+        });
+
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.world == null || client.player == null) return;
             dotAnimTick++;
 
+            // Use entity iterator instead of getPlayers()
             ArrayList<AbstractClientPlayerEntity> players = new ArrayList<>();
-            client.world.getPlayers().forEach(p -> {
-                if (p instanceof AbstractClientPlayerEntity ap) players.add(ap);
-            });
+            for (var entity : client.world.getEntities()) {
+                if (entity instanceof AbstractClientPlayerEntity p && p != client.player) {
+                    players.add(p);
+                }
+            }
 
             for (AbstractClientPlayerEntity player : players) {
-                if (player == client.player) continue;
                 UUID uuid = player.getUuid();
                 Vec3d currentPos = new Vec3d(player.getX(), player.getY(), player.getZ());
                 Vec3d lastPos = lastPositions.get(uuid);
@@ -56,11 +63,6 @@ public class PlayerWatchClient implements ClientModInitializer {
                     idleTicks.merge(uuid, 1, Integer::sum);
                 }
             }
-
-            Set<UUID> currentUuids = new HashSet<>();
-            for (AbstractClientPlayerEntity p : players) currentUuids.add(p.getUuid());
-            idleTicks.keySet().retainAll(currentUuids);
-            lastPositions.keySet().retainAll(currentUuids);
         });
 
         HudRenderCallback.EVENT.register(PlayerWatchClient::renderLabels);
@@ -75,21 +77,17 @@ public class PlayerWatchClient implements ClientModInitializer {
         int screenW = client.getWindow().getScaledWidth();
         int screenH = client.getWindow().getScaledHeight();
 
-        ArrayList<AbstractClientPlayerEntity> renderPlayers = new ArrayList<>();
-        client.world.getPlayers().forEach(p -> {
-            if (p instanceof AbstractClientPlayerEntity ap) renderPlayers.add(ap);
-        });
-
-        for (AbstractClientPlayerEntity player : renderPlayers) {
+        for (var entity : client.world.getEntities()) {
+            if (!(entity instanceof AbstractClientPlayerEntity player)) continue;
             if (player == client.player) continue;
 
             String label = getLabel(player);
             if (label == null) continue;
             int color = getColor(player);
 
-            double px = MathHelper.lerp(tickDelta, player.lastRenderX, player.getX());
-            double py = MathHelper.lerp(tickDelta, player.lastRenderY, player.getY()) + player.getHeight() + 0.5;
-            double pz = MathHelper.lerp(tickDelta, player.lastRenderZ, player.getZ());
+            double px = player.getX();
+            double py = player.getY() + player.getHeight() + 0.5;
+            double pz = player.getZ();
 
             Vec3d camPos = new Vec3d(client.player.getX(), client.player.getEyeY(), client.player.getZ());
             Vec3d screenPos = projectToScreen(client, new Vec3d(px, py, pz), camPos, screenW, screenH);
