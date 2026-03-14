@@ -69,46 +69,29 @@ public class PlayerWatchClient implements ClientModInitializer {
     }
 
     private static void renderLabels(DrawContext context, RenderTickCounter tickCounter) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.world == null || client.player == null) return;
-        if (client.options.hudHidden) return;
+    MinecraftClient client = MinecraftClient.getInstance();
+    if (client.world == null || client.player == null) return;
+    if (client.options.hudHidden) return;
 
-        float tickDelta = 1.0f;
-        int screenW = client.getWindow().getScaledWidth();
-        int screenH = client.getWindow().getScaledHeight();
+    int screenW = client.getWindow().getScaledWidth();
+    int screenH = client.getWindow().getScaledHeight();
 
-        for (var entity : client.world.getEntities()) {
-            if (!(entity instanceof AbstractClientPlayerEntity player)) continue;
-            if (player == client.player) continue;
+    int playerCount = 0;
+    for (var entity : client.world.getEntities()) {
+        if (entity instanceof AbstractClientPlayerEntity p && p != client.player) {
+            playerCount++;
+            String label = getLabel(p);
 
-            String label = getLabel(player);
-            if (label == null) continue;
-            int color = getColor(player);
-
-            double px = player.getX();
-            double py = player.getY() + player.getHeight() + 0.5;
-            double pz = player.getZ();
-
-            Vec3d camPos = new Vec3d(client.player.getX(), client.player.getEyeY(), client.player.getZ());
-            Vec3d screenPos = projectToScreen(client, new Vec3d(px, py, pz), camPos, screenW, screenH);
-            if (screenPos == null) continue;
-
-            double dist = camPos.distanceTo(new Vec3d(px, py, pz));
+            // Draw all nearby players in a list on the left side of screen
+            double dist = new Vec3d(p.getX(), p.getY(), p.getZ())
+                .distanceTo(new Vec3d(client.player.getX(), client.player.getY(), client.player.getZ()));
             if (dist > 32) continue;
 
-            float scale = (float) MathHelper.clamp(1.0 - (dist / 48.0), 0.4, 1.0);
-            int sx = (int) screenPos.x;
-            int sy = (int) screenPos.y;
-            int textWidth = client.textRenderer.getWidth(label);
-
-            context.getMatrices().pushMatrix();
-            context.getMatrices().translate(sx, sy);
-            context.getMatrices().scale(scale, scale);
-            context.fill(-textWidth / 2 - 2, -2, textWidth / 2 + 2, 10, 0x60000000);
-            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(label), 0, 0, color);
-            context.getMatrices().popMatrix();
+            String debugLabel = p.getName().getString() + ": " + (label != null ? label : "normal") + " (" + (int)dist + "m)";
+            context.drawTextWithShadow(client.textRenderer, Text.literal(debugLabel), 5, 5 + (playerCount * 10), 0xFFFFFF);
         }
     }
+}
 
     private static String getLabel(AbstractClientPlayerEntity player) {
         UUID uuid = player.getUuid();
