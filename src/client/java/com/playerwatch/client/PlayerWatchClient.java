@@ -6,13 +6,12 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.render.RenderTickCounter;
+import net.minecraft.entity.pose.EntityPose;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -24,91 +23,77 @@ import java.util.UUID;
 @Environment(EnvType.CLIENT)
 public class PlayerWatchClient implements ClientModInitializer {
 
-    public static final Map<UUID, PlayerState> otherPlayerStates = new HashMap<>();
-    private static PlayerState currentState = PlayerState.NORMAL;
-    private static double lastX, lastY, lastZ;
-    private static float lastYaw, lastPitch;
-    private static int idleTicks = 0;
-    private static final int IDLE_THRESHOLD_TICKS = 200;
+    // Track last known positions for idle detection
+    private static final Map<UUID, Vec3d> lastPositions = new HashMap<>();
+    private static final Map<UUID, Integer> idleTicks = new HashMap<>();
+    private static final int IDLE_THRESHOLD = 200; // ~10 seconds
     private static int dotAnimTick = 0;
 
     @Override
     public void onInitializeClient() {
-        PlayerWatchMod.LOGGER.info("PlayerWatch initializing on client...");
+        PlayerWatchMod.LOGGER.info("PlayerWatch (client-only mode) initializing...");
 
-        ClientPlayNetworking.registerGlobalReceiver(
-                PlayerWatchMod.StateBroadcastPayload.ID,
-                (payload, context) -> {
-                    otherPlayerStates.put(payload.playerUuid(), PlayerState.fromId(payload.stateId()));
-                }
-        );
-
+        // Tick loop: update idle tracking for all visible players
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (client.player == null || client.world == null) return;
+            if (client.world == null || client.player == null) return;
             dotAnimTick++;
-            double px = client.player.getX();
-            double py = client.player.getY();
-            double pz = client.player.getZ();
-            float yaw = client.player.getYaw();
-            float pitch = client.player.getPitch();
-            boolean moved = (px != lastX || py != lastY || pz != lastZ || yaw != lastYaw || pitch != lastPitch);
-            if (moved) {
-                idleTicks = 0;
-                lastX = px; lastY = py; lastZ = pz;
-                lastYaw = yaw; lastPitch = pitch;
-            } else {
-                idleTicks++;
+
+            for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
+                if (player == client.player) continue;
+                UUID uuid = player.getUuid();
+                Vec3d currentPos = player.getPos();
+                Vec3d lastPos = lastPositions.get(uuid);
+
+                if (lastPos == null || !currentPos.equals(lastPos)) {
+                    lastPositions.put(uuid, currentPos);
+                    idleTicks.put(uuid, 0);
+                } else {
+                    idleTicks.merge(uuid, 1, Integer::sum);
+                }
             }
-            PlayerState newState;
-            if (client.currentScreen instanceof ChatScreen) {
-                newState = PlayerState.TYPING;
-            } else if (client.currentScreen != null) {
-                newState = PlayerState.IN_GUI;
-            } else if (idleTicks >= IDLE_THRESHOLD_TICKS) {
-                newState = PlayerState.IDLE;
-            } else {
-                newState = PlayerState.NORMAL;
-            }
-            if (newState != currentState) {
-                currentState = newState;
-                ClientPlayNetworking.send(new PlayerWatchMod.StateUpdatePayload(newState.id));
-            }
+
+            // Clean up disconnected players
+            idleTicks.keySet().removeIf(uuid ->
+                client.world.getPlayers().stream().noneMatch(p -> p.getUuid().equals(uuid))
+            );
+            lastPositions.keySet().removeIf(uuid ->
+                client.world.getPlayers().stream().noneMatch(p -> p.getUuid().equals(uuid))
+            );
         });
 
-        HudRenderCallback.EVENT.register(PlayerWatchClient::renderHudLabels);
+        HudRenderCallback.EVENT.register(PlayerWatchClient::renderLabels);
     }
 
-    private static void renderHudLabels(DrawContext context, RenderTickCounter tickCounter) {
+    private static void renderLabels(DrawContext context, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.world == null || client.player == null) return;
         if (client.options.hudHidden) return;
 
         float tickDelta = tickCounter.getTickDelta(true);
-        int screenWidth = client.getWindow().getScaledWidth();
-        int screenHeight = client.getWindow().getScaledHeight();
+        int screenW = client.getWindow().getScaledWidth();
+        int screenH = client.getWindow().getScaledHeight();
 
         for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
             if (player == client.player) continue;
-            UUID uuid = player.getUuid();
-            PlayerState state = otherPlayerStates.getOrDefault(uuid, PlayerState.NORMAL);
-            if (state == PlayerState.NORMAL) continue;
+
+            String label = getLabel(player);
+            if (label == null) continue;
+            int color = getColor(player);
 
             double px = MathHelper.lerp(tickDelta, player.prevX, player.getX());
             double py = MathHelper.lerp(tickDelta, player.prevY, player.getY()) + player.getHeight() + 0.5;
             double pz = MathHelper.lerp(tickDelta, player.prevZ, player.getZ());
 
-            Vec3d screenPos = projectToScreen(client, new Vec3d(px, py, pz), tickDelta, screenWidth, screenHeight);
+            Vec3d screenPos = projectToScreen(client, new Vec3d(px, py, pz), tickDelta, screenW, screenH);
             if (screenPos == null) continue;
 
             double dist = client.player.getPos().distanceTo(new Vec3d(px, py, pz));
             if (dist > 32) continue;
-            float scale = (float) MathHelper.clamp(1.0 - (dist / 48.0), 0.4, 1.0);
 
-            String label = getLabel(state);
-            int color = getColor(state);
-            int textWidth = client.textRenderer.getWidth(label);
+            float scale = (float) MathHelper.clamp(1.0 - (dist / 48.0), 0.4, 1.0);
             int sx = (int) screenPos.x;
             int sy = (int) screenPos.y;
+            int textWidth = client.textRenderer.getWidth(label);
 
             context.getMatrices().push();
             context.getMatrices().translate(sx, sy, 0);
@@ -117,6 +102,28 @@ public class PlayerWatchClient implements ClientModInitializer {
             context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(label), 0, 0, color);
             context.getMatrices().pop();
         }
+    }
+
+    private static String getLabel(AbstractClientPlayerEntity player) {
+        UUID uuid = player.getUuid();
+        int idle = idleTicks.getOrDefault(uuid, 0);
+
+        if (player.isSleeping()) return "😴 sleeping";
+        if (player.getPose() == EntityPose.SNEAKING) return "🤫 sneaking";
+        if (idle >= IDLE_THRESHOLD) {
+            int dots = (dotAnimTick / 10 % 3) + 1;
+            return "💤 afk" + ".".repeat(dots);
+        }
+        return null; // normal, show nothing
+    }
+
+    private static int getColor(AbstractClientPlayerEntity player) {
+        UUID uuid = player.getUuid();
+        int idle = idleTicks.getOrDefault(uuid, 0);
+        if (player.isSleeping()) return 0xAAAAAA;
+        if (player.getPose() == EntityPose.SNEAKING) return 0xFFCC55;
+        if (idle >= IDLE_THRESHOLD) return 0xCCCCCC;
+        return 0xFFFFFF;
     }
 
     private static Vec3d projectToScreen(MinecraftClient client, Vec3d worldPos, float tickDelta, int screenW, int screenH) {
@@ -149,23 +156,5 @@ public class PlayerWatchClient implements ClientModInitializer {
 
         if (projX < -100 || projX > screenW + 100 || projY < -100 || projY > screenH + 100) return null;
         return new Vec3d(projX, projY, rz);
-    }
-
-    private static String getLabel(PlayerState state) {
-        return switch (state) {
-            case TYPING -> "✏ typing" + ".".repeat((dotAnimTick / 10 % 3) + 1);
-            case IN_GUI -> "📦 in menu";
-            case IDLE -> "💤 idle";
-            default -> "";
-        };
-    }
-
-    private static int getColor(PlayerState state) {
-        return switch (state) {
-            case TYPING -> 0xFFFFAA;
-            case IN_GUI -> 0xAADDFF;
-            case IDLE -> 0xCCCCCC;
-            default -> 0xFFFFFF;
-        };
     }
 }
