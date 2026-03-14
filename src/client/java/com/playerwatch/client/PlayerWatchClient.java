@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.entity.EntityPose;
 import net.minecraft.text.Text;
@@ -18,8 +19,8 @@ import net.minecraft.util.math.Vec3d;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -36,7 +37,6 @@ public class PlayerWatchClient implements ClientModInitializer {
     @SuppressWarnings("unchecked")
     private static List<AbstractClientPlayerEntity> getPlayers(MinecraftClient client) {
         if (client.world == null) return new ArrayList<>();
-        // Try reflection to find the right method name
         if (getPlayersMethod == null) {
             for (Method m : client.world.getClass().getMethods()) {
                 try {
@@ -98,7 +98,7 @@ public class PlayerWatchClient implements ClientModInitializer {
                 }
             }
 
-            java.util.Set<UUID> uuids = new java.util.HashSet<>();
+            HashSet<UUID> uuids = new HashSet<>();
             for (AbstractClientPlayerEntity p : players) uuids.add(p.getUuid());
             idleTicks.keySet().retainAll(uuids);
             lastPositions.keySet().retainAll(uuids);
@@ -110,10 +110,14 @@ public class PlayerWatchClient implements ClientModInitializer {
     private static void renderLabels(DrawContext context, RenderTickCounter tickCounter) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.world == null || client.player == null) return;
+        if (client.gameRenderer == null) return;
         if (client.options.hudHidden) return;
 
         int screenW = client.getWindow().getScaledWidth();
         int screenH = client.getWindow().getScaledHeight();
+
+        Camera camera = client.gameRenderer.getCamera();
+        Vec3d camPos = camera.getPos();
 
         for (AbstractClientPlayerEntity player : getPlayers(client)) {
             if (player == client.player) continue;
@@ -126,24 +130,18 @@ public class PlayerWatchClient implements ClientModInitializer {
             double py = player.getY() + player.getHeight() + 0.5;
             double pz = player.getZ();
 
-            Vec3d camPos = new Vec3d(client.player.getX(), client.player.getEyeY(), client.player.getZ());
-            Vec3d screenPos = projectToScreen(client, new Vec3d(px, py, pz), camPos, screenW, screenH);
+            Vec3d screenPos = projectToScreen(client, camera, new Vec3d(px, py, pz), camPos, screenW, screenH);
             if (screenPos == null) continue;
 
             double dist = camPos.distanceTo(new Vec3d(px, py, pz));
             if (dist > 32) continue;
 
-            float scale = (float) MathHelper.clamp(1.0 - (dist / 48.0), 0.4, 1.0);
             int sx = (int) screenPos.x;
             int sy = (int) screenPos.y;
             int textWidth = client.textRenderer.getWidth(label);
 
-            context.getMatrices().pushMatrix();
-            context.getMatrices().translate(sx, sy);
-            context.getMatrices().scale(scale, scale);
-            context.fill(-textWidth / 2 - 2, -2, textWidth / 2 + 2, 10, 0x60000000);
-            context.drawCenteredTextWithShadow(client.textRenderer, Text.literal(label), 0, 0, color);
-            context.getMatrices().popMatrix();
+            context.fill(sx - textWidth / 2 - 2, sy - 2, sx + textWidth / 2 + 2, sy + 10, 0x60000000);
+            context.drawText(client.textRenderer, Text.literal(label), sx - textWidth / 2, sy, color, true);
         }
     }
 
@@ -168,13 +166,13 @@ public class PlayerWatchClient implements ClientModInitializer {
         return 0xFFFFFF;
     }
 
-    private static Vec3d projectToScreen(MinecraftClient client, Vec3d worldPos, Vec3d camPos, int screenW, int screenH) {
+    private static Vec3d projectToScreen(MinecraftClient client, Camera camera, Vec3d worldPos, Vec3d camPos, int screenW, int screenH) {
         double dx = worldPos.x - camPos.x;
         double dy = worldPos.y - camPos.y;
         double dz = worldPos.z - camPos.z;
 
-        float yaw = (float) Math.toRadians(client.player.getYaw());
-        float pitch = (float) Math.toRadians(client.player.getPitch());
+        float yaw = (float) Math.toRadians(camera.getYaw());
+        float pitch = (float) Math.toRadians(camera.getPitch());
 
         double sinYaw = Math.sin(yaw);
         double cosYaw = Math.cos(yaw);
