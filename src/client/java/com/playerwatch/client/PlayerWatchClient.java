@@ -109,7 +109,7 @@ public class PlayerWatchClient implements ClientModInitializer {
         int idle = idleTicks.getOrDefault(uuid, 0);
 
         if (player.isSleeping()) return "😴 sleeping";
-        if (player.getPose() == EntityPose.SNEAKING) return "🤫 sneaking";
+        if (player.getPose() == EntityPose.CROUCHING) return "🤫 sneaking";
         if (idle >= IDLE_THRESHOLD) {
             int dots = (dotAnimTick / 10 % 3) + 1;
             return "💤 afk" + ".".repeat(dots);
@@ -121,7 +121,7 @@ public class PlayerWatchClient implements ClientModInitializer {
         UUID uuid = player.getUuid();
         int idle = idleTicks.getOrDefault(uuid, 0);
         if (player.isSleeping()) return 0xAAAAAA;
-        if (player.getPose() == EntityPose.SNEAKING) return 0xFFCC55;
+        if (player.getPose() == EntityPose.CROUCHING) return 0xFFCC55;
         if (idle >= IDLE_THRESHOLD) return 0xCCCCCC;
         return 0xFFFFFF;
     }
