@@ -59,7 +59,6 @@ public class PlayerWatchClient implements ClientModInitializer {
                 getPlayersMethod = null;
             }
         }
-        // Fallback: scan all entities
         List<AbstractClientPlayerEntity> result = new ArrayList<>();
         try {
             for (var entity : client.world.getEntities()) {
@@ -117,7 +116,7 @@ public class PlayerWatchClient implements ClientModInitializer {
         int screenH = client.getWindow().getScaledHeight();
 
         Camera camera = client.gameRenderer.getCamera();
-        Vec3d camPos = new Vec3d(camera.getX(), camera.getY(), camera.getZ());
+        Vec3d camPos = camera.getCameraPos();
 
         for (AbstractClientPlayerEntity player : getPlayers(client)) {
             if (player == client.player) continue;
@@ -130,7 +129,7 @@ public class PlayerWatchClient implements ClientModInitializer {
             double py = player.getY() + player.getHeight() + 0.5;
             double pz = player.getZ();
 
-            Vec3d screenPos = projectToScreen(client, camera, new Vec3d(px, py, pz), camPos, screenW, screenH);
+            Vec3d screenPos = projectToScreen(camera, new Vec3d(px, py, pz), camPos, screenW, screenH, client);
             if (screenPos == null) continue;
 
             double dist = camPos.distanceTo(new Vec3d(px, py, pz));
@@ -166,7 +165,7 @@ public class PlayerWatchClient implements ClientModInitializer {
         return 0xFFFFFF;
     }
 
-    private static Vec3d projectToScreen(MinecraftClient client, Camera camera, Vec3d worldPos, Vec3d camPos, int screenW, int screenH) {
+    private static Vec3d projectToScreen(Camera camera, Vec3d worldPos, Vec3d camPos, int screenW, int screenH, MinecraftClient client) {
         double dx = worldPos.x - camPos.x;
         double dy = worldPos.y - camPos.y;
         double dz = worldPos.z - camPos.z;
